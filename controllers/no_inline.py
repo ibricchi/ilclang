@@ -94,7 +94,7 @@ def run_no_inlining(
         Logger.debug("Writing final callgraph to", final_callgraph_file)
         with open(final_callgraph_file, "w") as f:
             for caller, callee, loc in callbacks.callgraph:
-                f.write(f"{caller} {callee} {loc}")
+                f.write(f"{caller} -> {callee} @ {loc}\n")
 
     if log_file is not None:
         Logger.debug("Writing log to", log_file)

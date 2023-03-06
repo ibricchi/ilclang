@@ -31,7 +31,7 @@ if __name__ == "__main__":
 
     if args.verbose:
         Logger.enable_debug = True
-
+    
     if sys.argv[0].endswith('++'):
         compiler = os.path.join(args.prefix, 'clang++')
     else:

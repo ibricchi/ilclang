@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import random
 import shlex
+import sys
 
 from pyllinliner.inlinercontroller import (
     ThinInlineController,
@@ -54,7 +55,7 @@ class RandomInliningCallBacks(InliningControllerCallBacks):
 
         if self.store_decisions:
             call_site = self.call_sites.pop(id)
-            self.decisions.add_decision(call_site, decison)
+            self.decisions.add_decision(call_site, decison, default != decison)
 
         return decison
 
@@ -112,15 +113,15 @@ def run_random_inlining(
     result = controller.run_with_args(shlex.join(args))
 
     if decision_file is not None:
-        Logger.info("Writing decisions to", decision_file)
+        Logger.debug("Writing decisions to", decision_file)
         with open(decision_file, "w") as f:
-            f.write(f"{callbacks.decisions.to_string()}")
+            f.write(f"{callbacks.decisions}")
         
     if final_callgraph_file is not None:
         Logger.debug("Writing final callgraph to", final_callgraph_file)
         with open(final_callgraph_file, "w") as f:
             for caller, callee, loc in callbacks.callgraph:
-                f.write(f"{caller} {callee} {loc}")
+                f.write(f"{caller} -> {callee} @ {loc}\n")
 
     if log_file is not None:
         Logger.debug("Writing log to", log_file)
