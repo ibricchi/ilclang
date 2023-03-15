@@ -18,6 +18,7 @@ if __name__ == "__main__":
     # subparser for random-inline mode
     parser_random_inline = subparsers.add_parser('random-inline', help='randomly flip decision to inline')
     parser_random_inline.add_argument('flip_rate', type=float, help='rate of flipping decision')
+    parser_random_inline.add_argument('-s', '--seed', type=int, help='random seed')
 
     for p in [parser_no_inline, parser_random_inline]:
         p.add_argument('-p', '--prefix', type=str, help='path to folder containing clang', default='')
@@ -37,11 +38,26 @@ if __name__ == "__main__":
     else:
         compiler = os.path.join(args.prefix, 'clang')
 
+    ret = 0
+    result = ""
+
     if args.mode == 'no-inline':
         from controllers.no_inline import run_no_inlining
-        run_no_inlining(compiler, args.log, args.decision, args.final_callgraph, args.lto, args.cli)
+        ret, result = run_no_inlining(compiler, args.log, args.decision, args.final_callgraph, args.lto, args.cli)
     elif args.mode == 'random-inline':
         from controllers.random import run_random_inlining
-        run_random_inlining(compiler, args.log, args.decision, args.final_callgraph, args.lto, args.cli, args.flip_rate)
+        ret, result = run_random_inlining(compiler, args.log, args.decision, args.final_callgraph, args.lto, args.cli, args.flip_rate, args.seed)
     else:
         Logger.fatal(f"Invalid mode {args.mode}")
+
+    stdout = result.split("STDOUT:")[-1].split("STDDBG:")[0].strip()
+    stddbg = result.split("STDDBG:")[-1].split("STDERR:")[0].strip()
+    stderr = result.split("STDERR:")[-1].strip()
+
+    if stdout != "":
+        Logger.info(stdout)
+    if stddbg != "":
+        Logger.debug(stddbg)
+    if stderr != "":
+        Logger.error(stderr)
+    exit(ret)

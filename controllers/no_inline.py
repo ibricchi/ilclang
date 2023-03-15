@@ -8,9 +8,10 @@ from pyllinliner.inlinercontroller import (
     PluginSettings,
 )
 
-from utils.callgraph import CallSite
+from utils.callsite import CallSite
 from utils.decision import DecisionSet
 from utils.logger import Logger
+from utils.run_log import decision_log, callgraph_log, result_log
 
 
 class NoInliningCallBacks(InliningControllerCallBacks):
@@ -41,6 +42,7 @@ class NoInliningCallBacks(InliningControllerCallBacks):
         return False
 
     def push(self, id: int, caller: str, callee: str, loc: str) -> None:
+        Logger.debug(f"Pushing {id} {caller} {callee} {loc}")
         self.call_ids.append(id)
         if self.store_decisions:
             call_site = CallSite(caller, callee, loc)
@@ -86,18 +88,15 @@ def run_no_inlining(
     result = controller.run_with_args(shlex.join(args))
 
     if decision_file is not None:
-        Logger.info("Writing decisions to", decision_file)
-        with open(decision_file, "w") as f:
-            f.write(f"{callbacks.decisions.to_string()}")
+        decision_log(decision_file, callbacks.decisions)
         
     if final_callgraph_file is not None:
-        Logger.debug("Writing final callgraph to", final_callgraph_file)
-        with open(final_callgraph_file, "w") as f:
-            for caller, callee, loc in callbacks.callgraph:
-                f.write(f"{caller} -> {callee} @ {loc}\n")
+        callgraph_log(final_callgraph_file, callbacks.callgraph)
+        
+    # if decision_file is not None and final_callgraph_file is not None:
+    #     callgraph_dot_log(callbacks.callgraph, callbacks.decisions)
 
     if log_file is not None:
-        Logger.debug("Writing log to", log_file)
-        with open(log_file, "w") as f:
-            f.write(result)
-    Logger.debug(result)
+        result_log(log_file, result)
+
+    return result

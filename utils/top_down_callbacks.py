@@ -1,5 +1,5 @@
 from pyllinliner.inlinercontroller import InliningControllerCallBacks
-from utils.callgraph import CallGraph, CallSite
+from utils.callsite import CallGraph, CallSite
 
 
 class TopDownCallBacks(InliningControllerCallBacks):

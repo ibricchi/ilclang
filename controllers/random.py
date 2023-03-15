@@ -10,7 +10,7 @@ from pyllinliner.inlinercontroller import (
     PluginSettings,
 )
 
-from utils.callgraph import CallSite
+from utils.callsite import CallSite
 from utils.decision import DecisionSet
 from utils.logger import Logger
 
@@ -32,9 +32,10 @@ class RandomInliningCallBacks(InliningControllerCallBacks):
         flip_probability: float,
         store_decisions: bool,
         store_final_callgraph: bool,
+        seed: int | None
     ) -> None:
         self.flip_probability = flip_probability
-        self.rng = random.Random()
+        self.rng = random.Random(seed)
 
         self.store_decisions = store_decisions
         self.store_final_callgraph = store_final_callgraph
@@ -97,9 +98,10 @@ def run_random_inlining(
     lto: bool,
     args: list[str],
     flip_probability: float,
+    seed: int|None
 ) -> None:
     callbacks = RandomInliningCallBacks(
-        flip_probability, decision_file is not None, final_callgraph_file is not None
+        flip_probability, decision_file is not None, final_callgraph_file is not None, seed
     )
 
     controller = ThinInlineController(
@@ -110,7 +112,7 @@ def run_random_inlining(
         else ThinInlineController.Mode.PLUGIN_COMPILE,
     )
 
-    result = controller.run_with_args(shlex.join(args))
+    ret, result = controller.run_with_args(shlex.join(args))
 
     if decision_file is not None:
         Logger.debug("Writing decisions to", decision_file)
@@ -127,4 +129,5 @@ def run_random_inlining(
         Logger.debug("Writing log to", log_file)
         with open(log_file, "w") as f:
             f.write(result)
-    Logger.debug(result)
+
+    return ret, result

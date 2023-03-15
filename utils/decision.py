@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from utils.callgraph import CallSite
+from utils.callsite import CallSite
 
 
 @dataclass()
@@ -78,6 +78,12 @@ class DecisionSet:
 
     def short_hand(self) -> str:
         return "".join(d.short_hand() for d in self.decisions)
+
+    def decision_for(self, call_site: CallSite) -> Decision | None:
+        for d in self.decisions:
+            if d.call_site == call_site:
+                return d
+        return None
 
     def __str__(self) -> str:
         output = ""
