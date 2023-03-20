@@ -2,32 +2,32 @@ class Logger:
     enable_debug = False
     
     @staticmethod
-    def info(*args) -> None:
-        print(*args)
+    def info(*pos, **args) -> None:
+        print(*pos, **args)
     
     @staticmethod
-    def debug(*args) -> None:
+    def debug(*pos, **args) -> None:
         if Logger.enable_debug:
             # print in blue
             print(f"\033[94m", end="")
-            print(*args)
+            print(*pos, **args)
             print(f"\033[0m", end="")
     
     @staticmethod
-    def warn(*args) -> None:
+    def warn(*pos, **args) -> None:
         print(f"\033[93m", end="")
-        print(*args)
+        print(*pos, **args)
         print(f"\033[0m", end="")
 
     @staticmethod
-    def error(*args) -> None:
+    def error(*pos, **args) -> None:
         print(f"\033[91m", end="")
-        print(*args)
+        print(*pos, **args)
         print(f"\033[0m", end="")
 
     @staticmethod
-    def fatal(*args) -> None:
+    def fatal(*pos, **args) -> None:
         print(f"\033[91m", end="")
-        print(*args)
+        print(*pos, **args)
         print(f"\033[0m", end="")
         exit(1)
