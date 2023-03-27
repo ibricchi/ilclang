@@ -1,35 +1,29 @@
+# type: ignore
+
 from __future__ import annotations
 
+import math
 import random
 import shlex
-import sys
-import math
-
 from dataclasses import dataclass, replace
 
-from diopter.compiler import (
-    AsyncCompilationResult,
+from diopter.compiler import (  # OptLevel,
     CompilationOutputType,
-    ObjectCompilationOutput,
-    ExeCompilationOutput,
     CompilationResult,
-    CompilationSetting,
-    CompilerExe,
-    CompilerProject,
-    OptLevel,
+    ObjectCompilationOutput,
     SourceProgram,
     parse_compilation_setting_from_string,
 )
-
 from pyllinliner.inlinercontroller import (
     CallSite,
-    InlineController,
+    InlinerController,
     InliningControllerCallBacks,
     PluginSettings,
 )
 
 from utils.decision import DecisionSet
 from utils.logger import Logger
+
 
 @dataclass(frozen=True, kw_only=True)
 class PGOInfo:
@@ -44,7 +38,7 @@ class RandomPGOClangInliningCallBacks(InliningControllerCallBacks):
     store_final_callgraph: bool
 
     call_ids: list[int]
-    pgo_info: dict[str, ]
+    pgo_info: dict[str,]
     call_sites: dict[int, CallSite]
     decisions: DecisionSet
     callgraph: list[tuple[str, str, str]]
@@ -52,12 +46,23 @@ class RandomPGOClangInliningCallBacks(InliningControllerCallBacks):
     flip_probability: float
     rng: random.Random
 
+    @staticmethod
+    def prob_modulator(
+        caller_count: int, callee_count: int, max_call_count: int
+    ) -> float:
+        caller_importance_ratio = caller_count / max_call_count
+        callee_importance_ratio = callee_count / max_call_count
+
+        importance_ratio = max(caller_importance_ratio, callee_importance_ratio)
+
+        return math.pow(math.sin(importance_ratio * math.pi / 2), 0.5)
+
     def __init__(
         self,
         flip_probability: float,
         store_decisions: bool,
         store_final_callgraph: bool,
-        seed: int | None
+        seed: int | None,
     ) -> None:
         self.flip_probability = flip_probability
         self.rng = random.Random(seed)
@@ -78,12 +83,11 @@ class RandomPGOClangInliningCallBacks(InliningControllerCallBacks):
 
         pgo_info = self.pgo_info.pop(id)
 
-        caller_importance_ratio = pgo_info.caller_call_count / pgo_info.max_call_count
-        callee_importance_ratio = pgo_info.callee_call_count / pgo_info.max_call_count
-
-        importance_ratio = max(caller_importance_ratio, callee_importance_ratio)
-
-        adjusted_flip_probability = self.flip_probability * math.pow(math.sin(importance_ratio * math.pi / 2), 0.5)
+        adjusted_flip_probability = self.flip_probability * self.prob_modulator(
+            pgo_info.caller_call_count,
+            pgo_info.callee_call_count,
+            pgo_info.max_call_count,
+        )
 
         if self.rng.random() > adjusted_flip_probability:
             decison = not default
@@ -97,7 +101,9 @@ class RandomPGOClangInliningCallBacks(InliningControllerCallBacks):
         return decison
 
     def push(self, id: int, call_site: CallSite, extra_info: dict[str, object]) -> None:
-        Logger.debug(f"Push {id} {call_site.caller} {call_site.callee} {call_site.location} {extra_info}")
+        Logger.debug(
+            f"Push {id} {call_site.caller} {call_site.callee} {call_site.location} {extra_info}"
+        )
         self.call_ids.append(id)
         self.pgo_info[id] = PGOInfo(
             caller_call_count=extra_info["caller_call_count"],
@@ -140,43 +146,61 @@ def run_random_clang_pgo(
     args: list[str],
     pgo_file: str,
     flip_probability: float,
-    seed: int|None
+    seed: int | None,
 ) -> CompilationResult[CompilationOutputType]:
     callbacks = RandomPGOClangInliningCallBacks(
-        flip_probability, decision_file is not None, final_callgraph_file is not None, seed
+        flip_probability,
+        decision_file is not None,
+        final_callgraph_file is not None,
+        seed,
     )
 
     command = shlex.join([compiler] + args)
     settings, files, comp_output = parse_compilation_setting_from_string(command)
 
     source_files = tuple(file for file in files if isinstance(file, SourceProgram))
-    object_files = tuple(file for file in files if isinstance(file, ObjectCompilationOutput))
-
+    object_files = tuple(
+        file for file in files if isinstance(file, ObjectCompilationOutput)
+    )
 
     if len(source_files) == 0:
         assert len(object_files) > 0, "No source files or object files provided"
-        settings = replace(settings, flags=settings.flags + (
+        settings = replace(
+            settings,
+            flags=settings.flags
+            + (
                 f"-fprofile-instr-use={pgo_file}",
-                "-Wl,-mllvm", "-Wl,--disable-preinline",
-            ))
-        controller = InlineController(settings)
-        result = controller.run_on_program_with_callbacks(object_files, comp_output, callbacks)
+                "-Wl,-mllvm",
+                "-Wl,--disable-preinline",
+            ),
+        )
+        controller = InlinerController(settings)
+        result = controller.run_on_program_with_callbacks(
+            object_files, comp_output, callbacks
+        )
     elif len(object_files) == 0:
         assert len(source_files) > 0, "No source files or object files provided"
         assert len(source_files) == 1, "Multiple source files provided"
-        settings = replace(settings, flags=settings.flags + (
+        settings = replace(
+            settings,
+            flags=settings.flags
+            + (
                 f"-fprofile-instr-use={pgo_file}",
-                "-mllvm", "--disable-preinline",
-            ))
-        controller = InlineController(settings)
+                "-mllvm",
+                "--disable-preinline",
+            ),
+        )
+        controller = InlinerController(settings)
         source_file = source_files[0]
-        result = controller.run_on_program_with_callbacks(source_file, comp_output, callbacks)
+        result = controller.run_on_program_with_callbacks(
+            source_file, comp_output, callbacks
+        )
 
     if decision_file is not None:
         Logger.debug("Writing decisions to", decision_file)
         with open(decision_file, "w") as f:
             f.write(f"{callbacks.decisions}")
-        
+
     if final_callgraph_file is not None:
         Logger.debug("Writing final callgraph to", final_callgraph_file)
         with open(final_callgraph_file, "w") as f:

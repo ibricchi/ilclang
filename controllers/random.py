@@ -2,31 +2,27 @@ from __future__ import annotations
 
 import random
 import shlex
-import sys
+import subprocess as sp
+from types import SimpleNamespace
 
 from diopter.compiler import (
-    AsyncCompilationResult,
     CompilationOutputType,
-    ObjectCompilationOutput,
-    ExeCompilationOutput,
     CompilationResult,
-    CompilationSetting,
-    CompilerExe,
-    CompilerProject,
+    ObjectCompilationOutput,
     OptLevel,
-    SourceProgram,
+    SourceFile,
     parse_compilation_setting_from_string,
 )
-
 from pyllinliner.inlinercontroller import (
     CallSite,
-    InlineController,
+    InlinerController,
     InliningControllerCallBacks,
     PluginSettings,
 )
 
 from utils.decision import DecisionSet
 from utils.logger import Logger
+from utils.run_log import callgraph_log, decision_log, result_log
 
 
 class RandomInliningCallBacks(InliningControllerCallBacks):
@@ -36,8 +32,7 @@ class RandomInliningCallBacks(InliningControllerCallBacks):
     call_ids: list[int]
     call_sites: dict[int, CallSite]
     decisions: DecisionSet
-    callgraph: list[tuple[str, str, str]]
-
+    callgraph: tuple[CallSite, ...]
     flip_probability: float
     rng: random.Random
 
@@ -46,7 +41,7 @@ class RandomInliningCallBacks(InliningControllerCallBacks):
         flip_probability: float,
         store_decisions: bool,
         store_final_callgraph: bool,
-        seed: int | None
+        seed: int | None,
     ) -> None:
         self.flip_probability = flip_probability
         self.rng = random.Random(seed)
@@ -59,7 +54,7 @@ class RandomInliningCallBacks(InliningControllerCallBacks):
             self.call_sites = {}
             self.decisions = DecisionSet()
         if store_final_callgraph:
-            self.callgraph = []
+            self.callgraph = ()
 
     def advice(self, id: int, default: bool) -> bool:
         Logger.debug(f"Advice for {id} (default: {default})")
@@ -74,8 +69,10 @@ class RandomInliningCallBacks(InliningControllerCallBacks):
 
         return decison
 
-    def push(self, id: int, call_site: CallSite, extra_info: dict[str, object]) -> None:
-        Logger.debug(f"Push {id} {call_site.caller} {call_site.callee} {call_site.location}")
+    def push(self, id: int, call_site: CallSite) -> None:
+        Logger.debug(
+            f"Push {id} {call_site.caller} {call_site.callee} {call_site.location}"
+        )
         self.call_ids.append(id)
         if self.store_decisions:
             self.call_sites[id] = call_site
@@ -97,7 +94,7 @@ class RandomInliningCallBacks(InliningControllerCallBacks):
             report_callgraph_at_end=self.store_final_callgraph,
         )
 
-    def end(self, callgraph: list[tuple[str, str, str]]) -> None:
+    def end(self, callgraph: tuple[CallSite, ...]) -> None:
         Logger.debug("End")
         if self.store_final_callgraph:
             self.callgraph = self.callgraph + callgraph
@@ -110,43 +107,52 @@ def run_random_inlining(
     final_callgraph_file: str | None,
     args: list[str],
     flip_probability: float,
-    seed: int|None
+    seed: int | None,
 ) -> CompilationResult[CompilationOutputType]:
     callbacks = RandomInliningCallBacks(
-        flip_probability, decision_file is not None, final_callgraph_file is not None, seed
+        flip_probability,
+        decision_file is not None,
+        final_callgraph_file is not None,
+        seed,
     )
 
     command = shlex.join([compiler] + args)
     settings, files, comp_output = parse_compilation_setting_from_string(command)
 
-    source_files = tuple(file for file in files if isinstance(file, SourceProgram))
-    object_files = tuple(file for file in files if isinstance(file, ObjectCompilationOutput))
+    if settings.opt_level == OptLevel.O0:
+        Logger.warn("Optimization level is O0, will run with clang defaults.")
+        proc = sp.run(command, shell=True, stdout=sp.PIPE, stderr=sp.STDOUT)
+        new_comp_output = SimpleNamespace()
+        new_comp_output.stdout_stderr_output = proc.stdout.decode("utf-8")
+        return new_comp_output  # type: ignore
 
-    controller = InlineController(settings)
+    source_files = tuple(file for file in files if isinstance(file, SourceFile))
+    object_files = tuple(
+        file for file in files if isinstance(file, ObjectCompilationOutput)
+    )
+
+    controller = InlinerController(settings)
 
     if len(source_files) == 0:
         assert len(object_files) > 0, "No source files or object files provided"
-        result = controller.run_on_program_with_callbacks(object_files, comp_output, callbacks)
+        result = controller.run_on_program_with_callbacks(
+            object_files, comp_output, callbacks
+        )
     elif len(object_files) == 0:
         assert len(source_files) > 0, "No source files or object files provided"
         assert len(source_files) == 1, "Multiple source files provided"
         source_file = source_files[0]
-        result = controller.run_on_program_with_callbacks(source_file, comp_output, callbacks)
+        result = controller.run_on_program_with_callbacks(
+            source_file, comp_output, callbacks
+        )
 
     if decision_file is not None:
-        Logger.debug("Writing decisions to", decision_file)
-        with open(decision_file, "w") as f:
-            f.write(f"{callbacks.decisions}")
-        
+        decision_log(decision_file, callbacks.decisions)
+
     if final_callgraph_file is not None:
-        Logger.debug("Writing final callgraph to", final_callgraph_file)
-        with open(final_callgraph_file, "w") as f:
-            for caller, callee, loc in callbacks.callgraph:
-                f.write(f"{caller} -> {callee} @ {loc}\n")
+        callgraph_log(final_callgraph_file, callbacks.callgraph)
 
     if log_file is not None:
-        Logger.debug("Writing log to", log_file)
-        with open(log_file, "w") as f:
-            f.write(result)
+        result_log(log_file, result.stdout_stderr_output)
 
-    return result
+    return result  # type: ignore
