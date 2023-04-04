@@ -19,8 +19,8 @@ repos:
     -   id: mypy
         additional_dependencies: [
             pyzmq==25.0.0,
-            betterproto==1.2.5,
-            diopter==0.0.17,
+            betterproto==2.0.0b5,
+            diopter==0.0.19,
             /local/home/ibricchi/pyllinliner
         ]
         args: [--strict]

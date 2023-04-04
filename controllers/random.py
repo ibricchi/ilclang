@@ -18,6 +18,7 @@ from pyllinliner.inlinercontroller import (
     InlinerController,
     InliningControllerCallBacks,
     PluginSettings,
+    proto
 )
 
 from utils.decision import DecisionSet
@@ -57,7 +58,6 @@ class RandomInliningCallBacks(InliningControllerCallBacks):
             self.callgraph = ()
 
     def advice(self, id: int, default: bool) -> bool:
-        Logger.debug(f"Advice for {id} (default: {default})")
         if self.rng.random() < self.flip_probability:
             decison = not default
         else:
@@ -69,35 +69,77 @@ class RandomInliningCallBacks(InliningControllerCallBacks):
 
         return decison
 
-    def push(self, id: int, call_site: CallSite) -> None:
-        Logger.debug(
-            f"Push {id} {call_site.caller} {call_site.callee} {call_site.location}"
-        )
+    def push(self, id: int, call_site: CallSite, pgo_info: proto.PgoInfo | None) -> None:
         self.call_ids.append(id)
         if self.store_decisions:
             self.call_sites[id] = call_site
 
     def pop(self) -> int:
         out = self.call_ids.pop(0)
-        Logger.debug("Popped ", out)
         return out
 
     def erase(self, ID: int) -> None:
-        Logger.debug(f"Erase {ID}")
         self.call_ids.remove(ID)
         if self.store_decisions:
             self.call_sites.pop(ID)
 
     def start(self) -> PluginSettings:
-        Logger.debug("Start")
         return PluginSettings(
             report_callgraph_at_end=self.store_final_callgraph,
         )
 
     def end(self, callgraph: tuple[CallSite, ...]) -> None:
-        Logger.debug("End")
         if self.store_final_callgraph:
             self.callgraph = self.callgraph + callgraph
+    
+class RandomInliningCallBacksVerbose(RandomInliningCallBacks):
+    memory: dict[int, CallSite]
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.memory = {}
+
+    def advice(self, id: int, default: bool) -> bool:
+        advice  = super().advice(id, default)
+        call_site = self.memory[id]
+        Logger.debug(f"Advice {call_site.caller} -> {call_site.callee} @ {call_site.location} = {advice} (default: {default})")
+        return advice
+    
+    def push(self, id: int, call_site: CallSite, pgo_info: proto.PgoInfo | None) -> None:
+        # Logger.debug(f"Push {call_site.caller} -> {call_site.callee} @ {call_site.location}")
+        self.memory.update({id: call_site})
+        super().push(id, call_site, pgo_info)
+    
+    def pop(self) -> int:
+        id = super().pop()
+        call_site = self.memory[id]
+        # Logger.debug(f"Pop {call_site.caller} -> {call_site.callee} @ {call_site.location}")
+        return id
+
+    def inlined(self, ID: int) -> None:
+        call_site = self.memory[ID]
+        Logger.debug(f"Inlined {call_site.caller} -> {call_site.callee} @ {call_site.location}")
+    
+    def inlined_with_callee_deleted(self, ID: int) -> None:
+        call_site = self.memory[ID]
+        Logger.debug(f"Inlined with callee deleted {call_site.caller} -> {call_site.callee} @ {call_site.location} (callee deleted)")
+    
+    def unsuccessful_inlining(self, ID: int) -> None:
+        call_site = self.memory[ID]
+        Logger.debug(f"Unsuccessful inlining {call_site.caller} -> {call_site.callee} @ {call_site.location}")
+    
+    def unattempted_inlining(self, ID: int) -> None:
+        call_site = self.memory[ID]
+        Logger.debug(f"Unattempted inlining {call_site.caller} -> {call_site.callee} @ {call_site.location}")
+
+    def start(self) -> PluginSettings:
+        Logger.debug("Start")
+        return super().start()
+
+    def end(self, callgraph: tuple[CallSite, ...]) -> None:
+        Logger.debug("End")
+        for call_site in callgraph:
+            Logger.debug(f"Callgraph {call_site.caller} -> {call_site.callee} @ {call_site.location}")
+        super().end(callgraph)
 
 
 def run_random_inlining(
@@ -109,7 +151,8 @@ def run_random_inlining(
     flip_probability: float,
     seed: int | None,
 ) -> CompilationResult[CompilationOutputType]:
-    callbacks = RandomInliningCallBacks(
+    # callbacks = RandomInliningCallBacks(
+    callbacks = RandomInliningCallBacksVerbose(
         flip_probability,
         decision_file is not None,
         final_callgraph_file is not None,
