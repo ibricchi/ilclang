@@ -3,6 +3,7 @@ from __future__ import annotations
 import random
 import shlex
 import subprocess as sp
+from dataclasses import replace
 from types import SimpleNamespace
 
 from diopter.compiler import (
@@ -98,7 +99,7 @@ class RandomInliningCallBacks(InliningControllerCallBacks):
 class RandomInliningCallBacksVerbose(RandomInliningCallBacks):
     memory: dict[int, CallSite]
 
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args, **kwargs) -> None:  # type: ignore
         super().__init__(*args, **kwargs)
         self.memory = {}
 
@@ -113,14 +114,18 @@ class RandomInliningCallBacksVerbose(RandomInliningCallBacks):
     def push(
         self, id: int, call_site: CallSite, pgo_info: proto.PgoInfo | None
     ) -> None:
-        # Logger.debug(f"Push {call_site.caller} -> {call_site.callee} @ {call_site.location}")
+        Logger.debug(
+            f"Push {call_site.caller} -> {call_site.callee} @ {call_site.location}"
+        )
         self.memory.update({id: call_site})
         super().push(id, call_site, pgo_info)
 
     def pop(self) -> int:
         id = super().pop()
         call_site = self.memory[id]
-        # Logger.debug(f"Pop {call_site.caller} -> {call_site.callee} @ {call_site.location}")
+        Logger.debug(
+            f"Pop {call_site.caller} -> {call_site.callee} @ {call_site.location}"
+        )
         return id
 
     def inlined(self, ID: int) -> None:
@@ -149,7 +154,7 @@ class RandomInliningCallBacksVerbose(RandomInliningCallBacks):
 
     def start(self) -> PluginSettings:
         Logger.debug("Start")
-        return super().start()
+        return replace(super().start(), enable_debug_logs=True)
 
     def end(self, callgraph: tuple[CallSite, ...]) -> None:
         Logger.debug("End")
@@ -168,13 +173,22 @@ def run_random_inlining(
     args: list[str],
     flip_probability: float,
     seed: int | None,
+    verbose: bool = False,
 ) -> CompilationResult[CompilationOutputType]:
-    # callbacks = RandomInliningCallBacks(
-    callbacks = RandomInliningCallBacksVerbose(
-        flip_probability,
-        decision_file is not None,
-        final_callgraph_file is not None,
-        seed,
+    callbacks = (
+        RandomInliningCallBacksVerbose(
+            flip_probability,
+            decision_file is not None,
+            final_callgraph_file is not None,
+            seed,
+        )
+        if verbose
+        else RandomInliningCallBacks(
+            flip_probability,
+            decision_file is not None,
+            final_callgraph_file is not None,
+            seed,
+        )
     )
 
     command = shlex.join([compiler] + args)

@@ -27,7 +27,7 @@ from utils.logger import Logger
 from utils.run_log import callgraph_log, decision_log, result_log
 
 
-class NoInliningCallBacks(InliningControllerCallBacks):
+class DefaultInliningCallBacks(InliningControllerCallBacks):
     store_decisions: bool
     store_final_callgraph: bool
 
@@ -50,8 +50,8 @@ class NoInliningCallBacks(InliningControllerCallBacks):
     def advice(self, id: int, default: bool) -> bool:
         if self.store_decisions:
             call_site = self.call_sites.pop(id)
-            self.decisions.add_decision(call_site, False)
-        return False
+            self.decisions.add_decision(call_site, default)
+        return default
 
     def push(
         self, id: int, call_site: CallSite, pgo_info: proto.PgoInfo | None
@@ -79,7 +79,7 @@ class NoInliningCallBacks(InliningControllerCallBacks):
             self.callgraph = self.callgraph + callgraph
 
 
-class NoInliningCallBacksVerbose(NoInliningCallBacks):
+class DefaultInliningCallBacksVerbose(DefaultInliningCallBacks):
     memory: dict[int, CallSite]
 
     def __init__(self, *args, **kwargs) -> None:  # type: ignore
@@ -148,7 +148,7 @@ class NoInliningCallBacksVerbose(NoInliningCallBacks):
         super().end(callgraph)
 
 
-def run_no_inlining(
+def run_default_inlining(
     compiler: str,
     log_file: str | None,
     decision_file: str | None,
@@ -157,11 +157,11 @@ def run_no_inlining(
     verbose: bool = False,
 ) -> CompilationResult[CompilationOutputType]:
     callbacks = (
-        NoInliningCallBacksVerbose(
+        DefaultInliningCallBacksVerbose(
             decision_file is not None, final_callgraph_file is not None
         )
         if verbose
-        else NoInliningCallBacks(
+        else DefaultInliningCallBacks(
             decision_file is not None, final_callgraph_file is not None
         )
     )

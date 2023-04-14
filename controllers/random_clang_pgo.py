@@ -19,6 +19,7 @@ from pyllinliner.inlinercontroller import (
     InlinerController,
     InliningControllerCallBacks,
     PluginSettings,
+    proto,
 )
 
 from utils.decision import DecisionSet
@@ -138,6 +139,75 @@ class RandomPGOClangInliningCallBacks(InliningControllerCallBacks):
             self.callgraph = self.callgraph + callgraph
 
 
+class RandomPGOClangInliningCallBacksVerbose(RandomPGOClangInliningCallBacks):
+    memory: dict[int, CallSite]
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.memory = {}
+
+    def advice(self, id: int, default: bool) -> bool:
+        advice = super().advice(id, default)
+        call_site = self.memory[id]
+        Logger.debug(
+            f"Advice {call_site.caller} -> {call_site.callee} @ {call_site.location} = {advice} (default: {default})"
+        )
+        return advice
+
+    def push(
+        self, id: int, call_site: CallSite, pgo_info: proto.PgoInfo | None
+    ) -> None:
+        Logger.debug(
+            f"Push {call_site.caller} -> {call_site.callee} @ {call_site.location}"
+        )
+        self.memory.update({id: call_site})
+        super().push(id, call_site, pgo_info)
+
+    def pop(self) -> int:
+        id = super().pop()
+        call_site = self.memory[id]
+        Logger.debug(
+            f"Pop {call_site.caller} -> {call_site.callee} @ {call_site.location}"
+        )
+        return id
+
+    def inlined(self, ID: int) -> None:
+        call_site = self.memory[ID]
+        Logger.debug(
+            f"Inlined {call_site.caller} -> {call_site.callee} @ {call_site.location}"
+        )
+
+    def inlined_with_callee_deleted(self, ID: int) -> None:
+        call_site = self.memory[ID]
+        Logger.debug(
+            f"Inlined with callee deleted {call_site.caller} -> {call_site.callee} @ {call_site.location} (callee deleted)"
+        )
+
+    def unsuccessful_inlining(self, ID: int) -> None:
+        call_site = self.memory[ID]
+        Logger.debug(
+            f"Unsuccessful inlining {call_site.caller} -> {call_site.callee} @ {call_site.location}"
+        )
+
+    def unattempted_inlining(self, ID: int) -> None:
+        call_site = self.memory[ID]
+        Logger.debug(
+            f"Unattempted inlining {call_site.caller} -> {call_site.callee} @ {call_site.location}"
+        )
+
+    def start(self) -> PluginSettings:
+        Logger.debug("Start")
+        return replace(super().start(), enable_debug_logs=True)
+
+    def end(self, callgraph: tuple[CallSite, ...]) -> None:
+        Logger.debug("End")
+        for call_site in callgraph:
+            Logger.debug(
+                f"Callgraph {call_site.caller} -> {call_site.callee} @ {call_site.location}"
+            )
+        super().end(callgraph)
+
+
 def run_random_clang_pgo(
     compiler: str,
     log_file: str | None,
@@ -147,12 +217,22 @@ def run_random_clang_pgo(
     pgo_file: str,
     flip_probability: float,
     seed: int | None,
+    verbose: bool = False,
 ) -> CompilationResult[CompilationOutputType]:
-    callbacks = RandomPGOClangInliningCallBacks(
-        flip_probability,
-        decision_file is not None,
-        final_callgraph_file is not None,
-        seed,
+    callbacks = (
+        RandomPGOClangInliningCallBacksVerbose(
+            flip_probability,
+            decision_file is not None,
+            final_callgraph_file is not None,
+            seed,
+        )
+        if verbose
+        else RandomPGOClangInliningCallBacks(
+            flip_probability,
+            decision_file is not None,
+            final_callgraph_file is not None,
+            seed,
+        )
     )
 
     command = shlex.join([compiler] + args)

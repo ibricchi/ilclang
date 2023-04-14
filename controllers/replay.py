@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import shlex
 import subprocess as sp
 import tempfile
@@ -27,7 +28,7 @@ from utils.logger import Logger
 from utils.run_log import callgraph_log, decision_log, result_log
 
 
-class NoInliningCallBacks(InliningControllerCallBacks):
+class ReplayInliningCallBacks(InliningControllerCallBacks):
     store_decisions: bool
     store_final_callgraph: bool
 
@@ -36,37 +37,50 @@ class NoInliningCallBacks(InliningControllerCallBacks):
     decisions: DecisionSet
     callgraph: tuple[CallSite, ...]
 
-    def __init__(self, store_decisions: bool, store_final_callgraph: bool) -> None:
+    replay_decisions: DecisionSet
+
+    def __init__(
+        self,
+        store_decisions: bool,
+        store_final_callgraph: bool,
+        replay_decisions: DecisionSet,
+    ) -> None:
+        self.replay_decisions = replay_decisions
+
         self.store_decisions = store_decisions
         self.store_final_callgraph = store_final_callgraph
 
         self.call_ids = []
+        self.call_sites = {}
         if store_decisions:
-            self.call_sites = {}
             self.decisions = DecisionSet()
         if store_final_callgraph:
             self.callgraph = ()
 
     def advice(self, id: int, default: bool) -> bool:
+        call_site = self.call_sites.pop(id)
+
+        if cs_decision := self.replay_decisions.decision_for(call_site):
+            decision = cs_decision.inlined
+        else:
+            decision = default
+
         if self.store_decisions:
-            call_site = self.call_sites.pop(id)
-            self.decisions.add_decision(call_site, False)
-        return False
+            self.decisions.add_decision(call_site, decision)
+        return decision
 
     def push(
         self, id: int, call_site: CallSite, pgo_info: proto.PgoInfo | None
     ) -> None:
         self.call_ids.append(id)
-        if self.store_decisions:
-            self.call_sites[id] = call_site
+        self.call_sites[id] = call_site
 
     def pop(self) -> int:
         return self.call_ids.pop(0)
 
     def erase(self, ID: int) -> None:
         self.call_ids.remove(ID)
-        if self.store_decisions:
-            self.call_sites.pop(ID)
+        self.call_sites.pop(ID)
 
     def start(self) -> PluginSettings:
         return PluginSettings(
@@ -79,7 +93,7 @@ class NoInliningCallBacks(InliningControllerCallBacks):
             self.callgraph = self.callgraph + callgraph
 
 
-class NoInliningCallBacksVerbose(NoInliningCallBacks):
+class ReplayInliningCallBacksVerbose(ReplayInliningCallBacks):
     memory: dict[int, CallSite]
 
     def __init__(self, *args, **kwargs) -> None:  # type: ignore
@@ -148,21 +162,48 @@ class NoInliningCallBacksVerbose(NoInliningCallBacks):
         super().end(callgraph)
 
 
-def run_no_inlining(
+def run_replay_inlining(
     compiler: str,
     log_file: str | None,
     decision_file: str | None,
     final_callgraph_file: str | None,
     args: list[str],
+    replay_file: str,
     verbose: bool = False,
 ) -> CompilationResult[CompilationOutputType]:
+    replay_decisions = DecisionSet()
+    with open(replay_file, "r") as f:
+        # for each line the information from the regex:
+        # [\(\[]CallSite\(caller=\'(.*)\', callee=\'(.*)\', location=\'(.*)\'\) : ([TF])[\)\]
+        # is stored in the following variables:
+        # caller = $1
+        # callee = $2
+        # location = $3
+        # decision = $4 == "T"
+        regex = r"([\(\[])CallSite\(caller=\'(.*)\', callee=\'(.*)\', location=\'(.*)\'\) : ([TF])[\)\]]"
+        for line in f:
+            if match := re.search(regex, line):
+                req, caller, callee, location, decision = match.groups()
+                if req == "[":
+                    replay_decisions.add_decision(
+                        CallSite(caller=caller, callee=callee, location=location),
+                        decision == "T",
+                        True,
+                    )
+            else:
+                raise Exception(f"Could not parse line: {line}")
+
     callbacks = (
-        NoInliningCallBacksVerbose(
-            decision_file is not None, final_callgraph_file is not None
+        ReplayInliningCallBacksVerbose(
+            decision_file is not None,
+            final_callgraph_file is not None,
+            replay_decisions,
         )
         if verbose
-        else NoInliningCallBacks(
-            decision_file is not None, final_callgraph_file is not None
+        else ReplayInliningCallBacks(
+            decision_file is not None,
+            final_callgraph_file is not None,
+            replay_decisions,
         )
     )
 

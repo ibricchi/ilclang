@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 
-import argparse
-import os
-import sys
-
-from diopter.compiler import CompilationOutputType, CompilationResult
-
-from utils.logger import Logger
-
 
 def main() -> None:
+    import argparse
+    import os
+    import sys
+
+    from diopter.compiler import CompilationOutputType, CompilationResult
+
+    from utils.logger import Logger
+
     parser = argparse.ArgumentParser(description="ILC Compiler")
     parser.add_argument(
         "-v", "--verbose", action="store_true", help="enable verbose output"
@@ -41,7 +41,20 @@ def main() -> None:
     )
     parser_random_clang_pgo.add_argument("-s", "--seed", type=int, help="random seed")
 
-    for p in [parser_no_inline, parser_random_inline, parser_random_clang_pgo]:
+    # subparser for default mode
+    parser_default = subparsers.add_parser("default", help="default inlining")
+
+    # subparser for replay mode
+    parser_replay = subparsers.add_parser("replay", help="replay inlining decisions")
+    parser_replay.add_argument("replay_file", type=str, help="path to replay file")
+
+    for p in [
+        parser_no_inline,
+        parser_random_inline,
+        parser_random_clang_pgo,
+        parser_default,
+        parser_replay,
+    ]:
         p.add_argument(
             "-p",
             "--prefix",
@@ -62,7 +75,14 @@ def main() -> None:
             required=True,
         )
 
+    # add test subparser
+    parser_test = subparsers.add_parser("test", help="test mode")
+    parser_test.add_argument("replay_file", type=str, help="path to replay file")
+
     args = parser.parse_args()
+
+    if args.mode == "test":
+        pass
 
     if args.verbose:
         Logger.enable_debug = True
@@ -77,7 +97,12 @@ def main() -> None:
         from controllers.no_inline import run_no_inlining
 
         result = run_no_inlining(
-            compiler, args.log, args.decision, args.final_callgraph, args.cli
+            compiler,
+            args.log,
+            args.decision,
+            args.final_callgraph,
+            args.cli,
+            verbose=args.verbose,
         )
     elif args.mode == "random-inline":
         from controllers.random import run_random_inlining
@@ -90,6 +115,7 @@ def main() -> None:
             args.cli,
             args.flip_rate,
             args.seed,
+            verbose=args.verbose,
         )
     elif args.mode == "random-clang-pgo":
         from controllers.random_clang_pgo import run_random_clang_pgo  # type: ignore
@@ -103,6 +129,30 @@ def main() -> None:
             args.pgo_file,
             args.flip_rate,
             args.seed,
+            verbose=args.verbose,
+        )
+    elif args.mode == "default":
+        from controllers.default import run_default_inlining
+
+        result = run_default_inlining(
+            compiler,
+            args.log,
+            args.decision,
+            args.final_callgraph,
+            args.cli,
+            verbose=args.verbose,
+        )
+    elif args.mode == "replay":
+        from controllers.replay import run_replay_inlining
+
+        result = run_replay_inlining(
+            compiler,
+            args.log,
+            args.decision,
+            args.final_callgraph,
+            args.cli,
+            args.replay_file,
+            verbose=args.verbose,
         )
     else:
         Logger.fatal(f"Invalid mode {args.mode}")

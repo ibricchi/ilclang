@@ -64,7 +64,7 @@ class DecisionSet:
             new_decisions.decisions.append(d.clone())
         return new_decisions
 
-    def clone_only_fixed(self) -> DecisionSet:
+    def clone_only_modified(self) -> DecisionSet:
         new_decisions = DecisionSet()
         for d in self.decisions:
             if d.modified:
