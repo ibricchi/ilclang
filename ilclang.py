@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+from controllers import default, no_inline, random, random_clang_pgo, replay
+
 
 def main() -> None:
     import argparse
@@ -15,44 +17,21 @@ def main() -> None:
         "-v", "--verbose", action="store_true", help="enable verbose output"
     )
 
+    # add subparser
     subparsers = parser.add_subparsers(
         dest="mode", help="compilation mode", required=True
     )
-
-    # subparser for no-inline mode
-    parser_no_inline = subparsers.add_parser("no-inline", help="no inlining performed")
-
-    # subparser for random-inline mode
-    parser_random_inline = subparsers.add_parser(
-        "random-inline", help="randomly flip decision to inline"
-    )
-    parser_random_inline.add_argument(
-        "flip_rate", type=float, help="rate of flipping decision"
-    )
-    parser_random_inline.add_argument("-s", "--seed", type=int, help="random seed")
-
-    # subparser for random-clang-pgo mode
-    parser_random_clang_pgo = subparsers.add_parser(
-        "random-clang-pgo", help="randomly flip decision to inline"
-    )
-    parser_random_clang_pgo.add_argument("pgo_file", type=str, help="path to pgo file")
-    parser_random_clang_pgo.add_argument(
-        "flip_rate", type=float, help="rate of flipping decision"
-    )
-    parser_random_clang_pgo.add_argument("-s", "--seed", type=int, help="random seed")
-
-    # subparser for default mode
-    parser_default = subparsers.add_parser("default", help="default inlining")
-
-    # subparser for replay mode
-    parser_replay = subparsers.add_parser("replay", help="replay inlining decisions")
-    parser_replay.add_argument("replay_file", type=str, help="path to replay file")
+    parser_default = default.setup_parser(subparsers)
+    parser_no_inline = no_inline.setup_parser(subparsers)
+    parser_random_inline = random.setup_parser(subparsers)
+    parser_random_clang_pgo = random_clang_pgo.setup_parser(subparsers)
+    parser_replay = replay.setup_parser(subparsers)
 
     for p in [
+        parser_default,
         parser_no_inline,
         parser_random_inline,
         parser_random_clang_pgo,
-        parser_default,
         parser_replay,
     ]:
         p.add_argument(
@@ -81,9 +60,6 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    if args.mode == "test":
-        pass
-
     if args.verbose:
         Logger.enable_debug = True
 
@@ -94,9 +70,7 @@ def main() -> None:
 
     result: CompilationResult[CompilationOutputType]  # type: ignore
     if args.mode == "no-inline":
-        from controllers.no_inline import run_no_inlining
-
-        result = run_no_inlining(
+        result = no_inline.run_inlining(
             compiler,
             args.log,
             args.decision,
@@ -105,9 +79,7 @@ def main() -> None:
             verbose=args.verbose,
         )
     elif args.mode == "random-inline":
-        from controllers.random import run_random_inlining
-
-        result = run_random_inlining(
+        result = random.run_inlining(
             compiler,
             args.log,
             args.decision,
@@ -118,9 +90,7 @@ def main() -> None:
             verbose=args.verbose,
         )
     elif args.mode == "random-clang-pgo":
-        from controllers.random_clang_pgo import run_random_clang_pgo  # type: ignore
-
-        result = run_random_clang_pgo(
+        result = random_clang_pgo.run_inlining(
             compiler,
             args.log,
             args.decision,
@@ -132,9 +102,7 @@ def main() -> None:
             verbose=args.verbose,
         )
     elif args.mode == "default":
-        from controllers.default import run_default_inlining
-
-        result = run_default_inlining(
+        result = default.run_inlining(
             compiler,
             args.log,
             args.decision,
@@ -143,9 +111,7 @@ def main() -> None:
             verbose=args.verbose,
         )
     elif args.mode == "replay":
-        from controllers.replay import run_replay_inlining
-
-        result = run_replay_inlining(
+        result = replay.run_inlining(
             compiler,
             args.log,
             args.decision,

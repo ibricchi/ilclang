@@ -19,11 +19,15 @@ from pyllinliner.inlinercontroller import (
     InlinerController,
     InliningControllerCallBacks,
     PluginSettings,
-    proto,
 )
 
 from utils.decision import DecisionSet
 from utils.logger import Logger
+from utils.verbose import VerboseCallBacks
+
+#############
+# CALLBACKS #
+#############
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -139,76 +143,24 @@ class RandomPGOClangInliningCallBacks(InliningControllerCallBacks):
             self.callgraph = self.callgraph + callgraph
 
 
-class RandomPGOClangInliningCallBacksVerbose(RandomPGOClangInliningCallBacks):
-    memory: dict[int, CallSite]
-
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
-        self.memory = {}
-
-    def advice(self, id: int, default: bool) -> bool:
-        advice = super().advice(id, default)
-        call_site = self.memory[id]
-        Logger.debug(
-            f"Advice {call_site.caller} -> {call_site.callee} @ {call_site.location} = {advice} (default: {default})"
-        )
-        return advice
-
-    def push(
-        self, id: int, call_site: CallSite, pgo_info: proto.PgoInfo | None
-    ) -> None:
-        Logger.debug(
-            f"Push {call_site.caller} -> {call_site.callee} @ {call_site.location}"
-        )
-        self.memory.update({id: call_site})
-        super().push(id, call_site, pgo_info)
-
-    def pop(self) -> int:
-        id = super().pop()
-        call_site = self.memory[id]
-        Logger.debug(
-            f"Pop {call_site.caller} -> {call_site.callee} @ {call_site.location}"
-        )
-        return id
-
-    def inlined(self, ID: int) -> None:
-        call_site = self.memory[ID]
-        Logger.debug(
-            f"Inlined {call_site.caller} -> {call_site.callee} @ {call_site.location}"
-        )
-
-    def inlined_with_callee_deleted(self, ID: int) -> None:
-        call_site = self.memory[ID]
-        Logger.debug(
-            f"Inlined with callee deleted {call_site.caller} -> {call_site.callee} @ {call_site.location} (callee deleted)"
-        )
-
-    def unsuccessful_inlining(self, ID: int) -> None:
-        call_site = self.memory[ID]
-        Logger.debug(
-            f"Unsuccessful inlining {call_site.caller} -> {call_site.callee} @ {call_site.location}"
-        )
-
-    def unattempted_inlining(self, ID: int) -> None:
-        call_site = self.memory[ID]
-        Logger.debug(
-            f"Unattempted inlining {call_site.caller} -> {call_site.callee} @ {call_site.location}"
-        )
-
-    def start(self) -> PluginSettings:
-        Logger.debug("Start")
-        return replace(super().start(), enable_debug_logs=True)
-
-    def end(self, callgraph: tuple[CallSite, ...]) -> None:
-        Logger.debug("End")
-        for call_site in callgraph:
-            Logger.debug(
-                f"Callgraph {call_site.caller} -> {call_site.callee} @ {call_site.location}"
-            )
-        super().end(callgraph)
+#######
+# API #
+#######
 
 
-def run_random_clang_pgo(
+def setup_parser(subparser):
+    parser_random_clang_pgo = subparser.add_parser(
+        "random-clang-pgo", help="randomly flip decision to inline"
+    )
+    parser_random_clang_pgo.add_argument("pgo_file", type=str, help="path to pgo file")
+    parser_random_clang_pgo.add_argument(
+        "flip_rate", type=float, help="rate of flipping decision"
+    )
+    parser_random_clang_pgo.add_argument("-s", "--seed", type=int, help="random seed")
+    return parser_random_clang_pgo
+
+
+def run_inlining(
     compiler: str,
     log_file: str | None,
     decision_file: str | None,
@@ -219,21 +171,14 @@ def run_random_clang_pgo(
     seed: int | None,
     verbose: bool = False,
 ) -> CompilationResult[CompilationOutputType]:
-    callbacks = (
-        RandomPGOClangInliningCallBacksVerbose(
-            flip_probability,
-            decision_file is not None,
-            final_callgraph_file is not None,
-            seed,
-        )
-        if verbose
-        else RandomPGOClangInliningCallBacks(
-            flip_probability,
-            decision_file is not None,
-            final_callgraph_file is not None,
-            seed,
-        )
+    callbacks = RandomPGOClangInliningCallBacks(
+        flip_probability,
+        decision_file is not None,
+        final_callgraph_file is not None,
+        seed,
     )
+    if verbose:
+        callbacks = VerboseCallBacks(callbacks)
 
     command = shlex.join([compiler] + args)
     settings, files, comp_output = parse_compilation_setting_from_string(command)

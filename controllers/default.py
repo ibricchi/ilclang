@@ -25,6 +25,11 @@ from pyllinliner.inlinercontroller import (
 from utils.decision import DecisionSet
 from utils.logger import Logger
 from utils.run_log import callgraph_log, decision_log, result_log
+from utils.verbose import VerboseCallBacks
+
+#############
+# CALLBACKS #
+#############
 
 
 class DefaultInliningCallBacks(InliningControllerCallBacks):
@@ -48,9 +53,6 @@ class DefaultInliningCallBacks(InliningControllerCallBacks):
             self.callgraph = ()
 
     def advice(self, id: int, default: bool) -> bool:
-        if self.store_decisions:
-            call_site = self.call_sites.pop(id)
-            self.decisions.add_decision(call_site, default)
         return default
 
     def push(
@@ -60,8 +62,9 @@ class DefaultInliningCallBacks(InliningControllerCallBacks):
         if self.store_decisions:
             self.call_sites[id] = call_site
 
-    def pop(self) -> int:
-        return self.call_ids.pop(0)
+    def pop(self, defaultOrderID: int) -> int:
+        self.call_ids.remove(defaultOrderID)
+        return defaultOrderID
 
     def erase(self, ID: int) -> None:
         self.call_ids.remove(ID)
@@ -79,76 +82,16 @@ class DefaultInliningCallBacks(InliningControllerCallBacks):
             self.callgraph = self.callgraph + callgraph
 
 
-class DefaultInliningCallBacksVerbose(DefaultInliningCallBacks):
-    memory: dict[int, CallSite]
-
-    def __init__(self, *args, **kwargs) -> None:  # type: ignore
-        super().__init__(*args, **kwargs)
-        self.memory = {}
-
-    def advice(self, id: int, default: bool) -> bool:
-        advice = super().advice(id, default)
-        call_site = self.memory[id]
-        Logger.debug(
-            f"Advice {call_site.caller} -> {call_site.callee} @ {call_site.location} = {advice} (default: {default})"
-        )
-        return advice
-
-    def push(
-        self, id: int, call_site: CallSite, pgo_info: proto.PgoInfo | None
-    ) -> None:
-        Logger.debug(
-            f"Push {call_site.caller} -> {call_site.callee} @ {call_site.location}"
-        )
-        self.memory.update({id: call_site})
-        super().push(id, call_site, pgo_info)
-
-    def pop(self) -> int:
-        id = super().pop()
-        call_site = self.memory[id]
-        Logger.debug(
-            f"Pop {call_site.caller} -> {call_site.callee} @ {call_site.location}"
-        )
-        return id
-
-    def inlined(self, ID: int) -> None:
-        call_site = self.memory[ID]
-        Logger.debug(
-            f"Inlined {call_site.caller} -> {call_site.callee} @ {call_site.location}"
-        )
-
-    def inlined_with_callee_deleted(self, ID: int) -> None:
-        call_site = self.memory[ID]
-        Logger.debug(
-            f"Inlined with callee deleted {call_site.caller} -> {call_site.callee} @ {call_site.location} (callee deleted)"
-        )
-
-    def unsuccessful_inlining(self, ID: int) -> None:
-        call_site = self.memory[ID]
-        Logger.debug(
-            f"Unsuccessful inlining {call_site.caller} -> {call_site.callee} @ {call_site.location}"
-        )
-
-    def unattempted_inlining(self, ID: int) -> None:
-        call_site = self.memory[ID]
-        Logger.debug(
-            f"Unattempted inlining {call_site.caller} -> {call_site.callee} @ {call_site.location}"
-        )
-
-    def start(self) -> PluginSettings:
-        Logger.debug("Start")
-        return replace(super().start(), enable_debug_logs=True)
-
-    def end(self, callgraph: tuple[CallSite, ...]) -> None:
-        Logger.debug("End")
-        for call_site in callgraph:
-            Logger.debug(
-                f"Callgraph {call_site.caller} -> {call_site.callee} @ {call_site.location}"
-            )
-        super().end(callgraph)
+#######
+# API #
+#######
 
 
-def run_default_inlining(
+def setup_parser(subparser):
+    return subparser.add_parser("default", help="default inlining")
+
+
+def run_inlining(
     compiler: str,
     log_file: str | None,
     decision_file: str | None,
@@ -156,15 +99,11 @@ def run_default_inlining(
     args: list[str],
     verbose: bool = False,
 ) -> CompilationResult[CompilationOutputType]:
-    callbacks = (
-        DefaultInliningCallBacksVerbose(
-            decision_file is not None, final_callgraph_file is not None
-        )
-        if verbose
-        else DefaultInliningCallBacks(
-            decision_file is not None, final_callgraph_file is not None
-        )
+    callbacks = DefaultInliningCallBacks(
+        decision_file is not None, final_callgraph_file is not None
     )
+    if verbose:
+        callbacks = VerboseCallBacks(callbacks)
 
     stdout = tempfile.NamedTemporaryFile()
     stderr = tempfile.NamedTemporaryFile()
