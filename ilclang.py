@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
 
-from controllers import default, no_inline, random, random_clang_pgo, replay
-
 
 def main() -> None:
     import argparse
@@ -10,6 +8,7 @@ def main() -> None:
 
     from diopter.compiler import CompilationOutputType, CompilationResult
 
+    from controllers import default, no_inline, random, random_clang_pgo, replay
     from utils.logger import Logger
 
     parser = argparse.ArgumentParser(description="ILC Compiler")
