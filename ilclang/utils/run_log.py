@@ -1,13 +1,20 @@
 from pyllinliner.inlinercontroller import CallSite
 
-from utils.decision import DecisionSet
-from utils.logger import Logger
+from ilclang.utils.decision import DecisionSet
+from ilclang.utils.logger import Logger
 
 
 def decision_log(decision_file: str, decisions: DecisionSet) -> None:
     Logger.debug("Writing decisions to", decision_file)
     with open(decision_file, "w") as f:
         f.write(f"{decisions}")
+
+
+def erased_log(erased_file: str, was_erased: list[CallSite]) -> None:
+    Logger.debug("Writing erased callsites to", erased_file)
+    with open(erased_file, "w") as f:
+        for callsite in was_erased:
+            f.write(f"{callsite}\n")
 
 
 def callgraph_log(final_callgraph_file: str, callgraph: tuple[CallSite, ...]) -> None:

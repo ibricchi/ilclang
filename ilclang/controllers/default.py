@@ -3,6 +3,9 @@ from __future__ import annotations
 import shlex
 import subprocess as sp
 import tempfile
+from argparse import ArgumentParser
+from argparse import Namespace as ANS
+from argparse import _SubParsersAction
 from dataclasses import replace
 from types import SimpleNamespace
 
@@ -19,13 +22,12 @@ from pyllinliner.inlinercontroller import (
     InlinerController,
     InliningControllerCallBacks,
     PluginSettings,
-    proto,
 )
 
-from utils.decision import DecisionSet
-from utils.logger import Logger
-from utils.run_log import callgraph_log, decision_log, result_log
-from utils.verbose import VerboseCallBacks
+from ilclang.utils.decision import DecisionSet
+from ilclang.utils.logger import Logger
+from ilclang.utils.run_log import callgraph_log, decision_log, erased_log, result_log
+from ilclang.utils.verbose import VerboseCallBacks
 
 #############
 # CALLBACKS #
@@ -40,6 +42,7 @@ class DefaultInliningCallBacks(InliningControllerCallBacks):
     call_sites: dict[int, CallSite]
     decisions: DecisionSet
     callgraph: tuple[CallSite, ...]
+    was_erased: list[CallSite]
 
     def __init__(self, store_decisions: bool, store_final_callgraph: bool) -> None:
         self.store_decisions = store_decisions
@@ -49,15 +52,17 @@ class DefaultInliningCallBacks(InliningControllerCallBacks):
         if store_decisions:
             self.call_sites = {}
             self.decisions = DecisionSet()
+            self.was_erased = []
         if store_final_callgraph:
             self.callgraph = ()
 
     def advice(self, id: int, default: bool) -> bool:
-        return default
+        decision = default
+        if self.store_decisions:
+            self.decisions.add_decision(self.call_sites[id], decision)
+        return decision
 
-    def push(
-        self, id: int, call_site: CallSite, pgo_info: proto.PgoInfo | None
-    ) -> None:
+    def push(self, id: int, call_site: CallSite) -> None:
         self.call_ids.append(id)
         if self.store_decisions:
             self.call_sites[id] = call_site
@@ -69,7 +74,7 @@ class DefaultInliningCallBacks(InliningControllerCallBacks):
     def erase(self, ID: int) -> None:
         self.call_ids.remove(ID)
         if self.store_decisions:
-            self.call_sites.pop(ID)
+            self.was_erased.append(self.call_sites.pop(ID))
 
     def start(self) -> PluginSettings:
         return PluginSettings(
@@ -87,28 +92,30 @@ class DefaultInliningCallBacks(InliningControllerCallBacks):
 #######
 
 
-def setup_parser(subparser):
+def setup_parser(subparser: _SubParsersAction[ArgumentParser]) -> ArgumentParser:
     return subparser.add_parser("default", help="default inlining")
 
 
 def run_inlining(
     compiler: str,
-    log_file: str | None,
-    decision_file: str | None,
-    final_callgraph_file: str | None,
-    args: list[str],
-    verbose: bool = False,
+    args: ANS,
 ) -> CompilationResult[CompilationOutputType]:
+    log_file = args.log
+    decision_file = args.decision
+    erased_file = args.erased
+    final_callgraph_file = args.final_callgraph
+    cli_args = args.cli
+
     callbacks = DefaultInliningCallBacks(
         decision_file is not None, final_callgraph_file is not None
     )
-    if verbose:
-        callbacks = VerboseCallBacks(callbacks)
+    if args.verbose or args.verbose_verbose:
+        callbacks = VerboseCallBacks(callbacks, args.verbose_verbose)  # type: ignore
 
     stdout = tempfile.NamedTemporaryFile()
     stderr = tempfile.NamedTemporaryFile()
 
-    command = shlex.join([compiler] + args)
+    command = shlex.join([compiler] + cli_args)
     settings, files, comp_output = parse_compilation_setting_from_string(command)
 
     if settings.opt_level == OptLevel.O0:
@@ -156,6 +163,9 @@ def run_inlining(
 
     if decision_file is not None:
         decision_log(decision_file, callbacks.decisions)
+
+    if erased_file is not None:
+        erased_log(erased_file, callbacks.was_erased)
 
     if final_callgraph_file is not None:
         callgraph_log(final_callgraph_file, callbacks.callgraph)

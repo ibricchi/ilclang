@@ -7,7 +7,7 @@ import networkx as nx  # type: ignore
 import pydot  # type: ignore
 from pyllinliner.inlinercontroller import CallSite
 
-from utils.decision import DecisionSet
+from ilclang.utils.decision import DecisionSet
 
 
 class CallGraph:

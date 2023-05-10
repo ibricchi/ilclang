@@ -1,9 +1,7 @@
-from setuptools import setup
+from setuptools import find_packages, setup
 
 setup(
     name="ilclang",
-    package_dir={
-        "utils": "utils",
-        "controllers": "controllers",
-    },
+    packages=find_packages(),
+    python_requires=">=3.6",
 )

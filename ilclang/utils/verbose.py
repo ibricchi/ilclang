@@ -1,22 +1,31 @@
 from dataclasses import replace
+from typing import Any
 
 from pyllinliner.inlinercontroller import (
     CallSite,
     InliningControllerCallBacks,
     PluginSettings,
-    proto,
 )
 
-from utils.logger import Logger
+from ilclang.utils.logger import Logger
 
 
 class VerboseCallBacks(InliningControllerCallBacks):
     parent: InliningControllerCallBacks
     memory: dict[int, CallSite]
+    verbose_verbose: bool
 
-    def __init__(self, parent: InliningControllerCallBacks) -> None:
+    def __getattr__(self, name: str) -> Any:
+        if name in self.__dict__:
+            return self.__dict__[name]
+        return getattr(self.parent, name)
+
+    def __init__(
+        self, parent: InliningControllerCallBacks, verbose_verbose: bool
+    ) -> None:
         self.parent = parent
         self.memory = {}
+        self.verbose_verbose = verbose_verbose
 
     def advice(self, id: int, default: bool) -> bool:
         advice = self.parent.advice(id, default)
@@ -26,14 +35,12 @@ class VerboseCallBacks(InliningControllerCallBacks):
         )
         return advice
 
-    def push(
-        self, id: int, call_site: CallSite, pgo_info: proto.PgoInfo | None
-    ) -> None:
+    def push(self, id: int, call_site: CallSite) -> None:
         Logger.debug(
             f"Push {call_site.caller} -> {call_site.callee} @ {call_site.location}"
         )
         self.memory.update({id: call_site})
-        self.parent.push(id, call_site, pgo_info)
+        self.parent.push(id, call_site)
 
     def pop(self, defaultOrderID: int) -> int:
         id = self.parent.pop(defaultOrderID)
@@ -42,6 +49,16 @@ class VerboseCallBacks(InliningControllerCallBacks):
             f"Pop {call_site.caller} -> {call_site.callee} @ {call_site.location}"
         )
         return id
+
+    def erase(
+        self,
+        id: int,
+    ) -> None:
+        call_site = self.memory[id]
+        Logger.debug(
+            f"Erase {call_site.caller} -> {call_site.callee} @ {call_site.location}"
+        )
+        self.parent.erase(id)
 
     def inlined(self, ID: int) -> None:
         call_site = self.memory[ID]
@@ -69,7 +86,12 @@ class VerboseCallBacks(InliningControllerCallBacks):
 
     def start(self) -> PluginSettings:
         Logger.debug("Start")
-        return replace(self.parent.start(), enable_debug_logs=True)
+        default = self.parent.start()
+        updated = replace(
+            default,
+            enable_debug_logs=self.verbose_verbose or default.enable_debug_logs,
+        )
+        return updated
 
     def end(self, callgraph: tuple[CallSite, ...]) -> None:
         Logger.debug("End")

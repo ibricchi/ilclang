@@ -1,9 +1,11 @@
 from __future__ import annotations
 
-import re
 import shlex
 import subprocess as sp
 import tempfile
+from argparse import ArgumentParser
+from argparse import Namespace as ANS
+from argparse import _SubParsersAction
 from dataclasses import replace
 from types import SimpleNamespace
 
@@ -20,13 +22,13 @@ from pyllinliner.inlinercontroller import (
     InlinerController,
     InliningControllerCallBacks,
     PluginSettings,
-    proto,
 )
 
-from utils.decision import DecisionSet
-from utils.logger import Logger
-from utils.run_log import callgraph_log, decision_log, result_log
-from utils.verbose import VerboseCallBacks
+from ilclang.utils.decision import DecisionSet
+from ilclang.utils.decision_file import load_callsite_file, load_decision_file
+from ilclang.utils.logger import Logger
+from ilclang.utils.run_log import callgraph_log, decision_log, erased_log, result_log
+from ilclang.utils.verbose import VerboseCallBacks
 
 #############
 # CALLBACKS #
@@ -37,61 +39,82 @@ class ReplayInliningCallBacks(InliningControllerCallBacks):
     store_decisions: bool
     store_final_callgraph: bool
 
-    call_ids: list[int]
-    call_sites: dict[int, CallSite]
+    id_map: dict[CallSite, int]
     decisions: DecisionSet
     callgraph: tuple[CallSite, ...]
 
     replay_decisions: DecisionSet
+    replay_idx: int
+
+    erase_ids: list[int]
+
+    plugin_settings: PluginSettings
 
     def __init__(
         self,
         store_decisions: bool,
         store_final_callgraph: bool,
         replay_decisions: DecisionSet,
+        erase_decisions: list[CallSite],
+        plugin_settings: PluginSettings,
     ) -> None:
         self.replay_decisions = replay_decisions
+        self.replay_idx = 0
+
+        self.erase_decisions = erase_decisions
 
         self.store_decisions = store_decisions
         self.store_final_callgraph = store_final_callgraph
 
-        self.call_ids = []
-        self.call_sites = {}
+        self.id_map = {}
         if store_decisions:
             self.decisions = DecisionSet()
         if store_final_callgraph:
             self.callgraph = ()
 
+        self.erase_ids = []
+
+        self.plugin_settings = plugin_settings
+
     def advice(self, id: int, default: bool) -> bool:
-        call_site = self.call_sites.pop(id)
+        current_decision = self.replay_decisions.decisions[self.replay_idx]
+        self.replay_idx += 1
 
-        if cs_decision := self.replay_decisions.decision_for(call_site):
-            decision = cs_decision.inlined
-        else:
-            decision = default
+        return current_decision.inlined
 
-        if self.store_decisions:
-            self.decisions.add_decision(call_site, decision)
-        return decision
+    def push(self, id: int, call_site: CallSite) -> None:
+        # check that call site is in replay decisions
+        cs_decision = self.replay_decisions.decision_for(call_site)
+        if cs_decision is None:
+            # check if call site is not in erase decisions
+            if call_site not in self.erase_decisions:
+                assert (
+                    False
+                ), f"Call site {call_site} not in replay decisions or erase decisions"
+            else:
+                self.erase_ids.append(id)
+            return
 
-    def push(
-        self, id: int, call_site: CallSite, pgo_info: proto.PgoInfo | None
-    ) -> None:
-        self.call_ids.append(id)
-        self.call_sites[id] = call_site
+        # add call site to id map
+        self.id_map[call_site] = id
 
-    def pop(self) -> int:
-        return self.call_ids.pop(0)
+    def pop(self, defaultOrderID: int) -> int:
+        # get call site at instruction index
+        next_decision = self.replay_decisions.decisions[self.replay_idx]
+        call_site = next_decision.call_site
+        # print(f"Popped: {call_site}")
+
+        assert (
+            call_site in self.id_map
+        ), f"Call site required for replay hasn't been pused yet, {call_site}"
+
+        return self.id_map.pop(call_site)
 
     def erase(self, ID: int) -> None:
-        self.call_ids.remove(ID)
-        self.call_sites.pop(ID)
+        assert ID in self.erase_ids, "Tried to erase callsite not in erase decisions"
 
     def start(self) -> PluginSettings:
-        return PluginSettings(
-            report_callgraph_at_end=self.store_final_callgraph,
-            # enable_debug_logs=True
-        )
+        return self.plugin_settings
 
     def end(self, callgraph: tuple[CallSite, ...]) -> None:
         if self.store_final_callgraph:
@@ -103,55 +126,66 @@ class ReplayInliningCallBacks(InliningControllerCallBacks):
 #######
 
 
-def setup_parser(subparser):
+def setup_parser(subparser: _SubParsersAction[ArgumentParser]) -> ArgumentParser:
     parser_replay = subparser.add_parser("replay", help="replay inlining decisions")
     parser_replay.add_argument("replay_file", type=str, help="path to replay file")
+    parser_replay.add_argument(
+        "erase_file", type=str, help="path to erase file", default=None
+    )
+    parser_replay.add_argument(
+        "-rcg", "--report-callgraph", action="store_true", help="report final callgraph"
+    )
+    parser_replay.add_argument(
+        "-imi", "--include-module-ir", action="store_true", help="include module IR"
+    )
+    parser_replay.add_argument(
+        "-ni", "--no-inline", action="store_true", help="do not inline"
+    )
+    parser_replay.add_argument(
+        "-dc", "--duplicate-calls", action="store_true", help="duplicate calls"
+    )
+    parser_replay.add_argument(
+        "-rh", "--record-history", action="store_true", help="record history"
+    )
     return parser_replay
 
 
 def run_inlining(
     compiler: str,
-    log_file: str | None,
-    decision_file: str | None,
-    final_callgraph_file: str | None,
-    args: list[str],
-    replay_file: str,
-    verbose: bool = False,
+    args: ANS,
 ) -> CompilationResult[CompilationOutputType]:
-    replay_decisions = DecisionSet()
-    with open(replay_file, "r") as f:
-        # for each line the information from the regex:
-        # [\(\[]CallSite\(caller=\'(.*)\', callee=\'(.*)\', location=\'(.*)\'\) : ([TF])[\)\]
-        # is stored in the following variables:
-        # caller = $1
-        # callee = $2
-        # location = $3
-        # decision = $4 == "T"
-        regex = r"([\(\[])CallSite\(caller=\'(.*)\', callee=\'(.*)\', location=\'(.*)\'\) : ([TF])[\)\]]"
-        for line in f:
-            if match := re.search(regex, line):
-                req, caller, callee, location, decision = match.groups()
-                if req == "[":
-                    replay_decisions.add_decision(
-                        CallSite(caller=caller, callee=callee, location=location),
-                        decision == "T",
-                        True,
-                    )
-            else:
-                raise Exception(f"Could not parse line: {line}")
+    log_file = args.log
+    decision_file = args.decision
+    final_callgraph_file = args.final_callgraph
+    cli_args = args.cli
+    replay_file = args.replay_file
+    erase_file = args.erase_file
+
+    replay_decisions = load_decision_file(replay_file)
+    erase_decisions = []
+    if erase_file is not None:
+        erase_decisions = load_callsite_file(erase_file)
 
     callbacks = ReplayInliningCallBacks(
         decision_file is not None,
         final_callgraph_file is not None,
         replay_decisions,
+        erase_decisions,
+        PluginSettings(
+            report_callgraph_at_end=args.report_callgraph,
+            include_module_ir_on_each_advice_reply=args.include_module_ir,
+            no_inline=args.no_inline,
+            no_duplicate_calls=not args.duplicate_calls,
+            record_history=args.record_history,
+        ),
     )
-    if verbose:
-        callbacks = VerboseCallBacks(callbacks)
+    if args.verbose or args.verbose_verbose:
+        callbacks = VerboseCallBacks(callbacks, args.verbose_verbose)  # type: ignore
 
     stdout = tempfile.NamedTemporaryFile()
     stderr = tempfile.NamedTemporaryFile()
 
-    command = shlex.join([compiler] + args)
+    command = shlex.join([compiler] + cli_args)
     settings, files, comp_output = parse_compilation_setting_from_string(command)
 
     if settings.opt_level == OptLevel.O0:
@@ -199,6 +233,9 @@ def run_inlining(
 
     if decision_file is not None:
         decision_log(decision_file, callbacks.decisions)
+
+    if args.erased is not None:
+        erased_log(args.erased, callbacks.erase_decisions)
 
     if final_callgraph_file is not None:
         callgraph_log(final_callgraph_file, callbacks.callgraph)
