@@ -64,6 +64,9 @@ def trickle_decision_change(
     og_decisions: DecisionSet, call_site: CallSite, inlined: bool
 ) -> list[DecisionSet]:
     decisions = og_decisions.clone()
+    print(f"Before any changes: {len(decisions.decisions)}")
+    decisions.remove_implicit_duplicates()
+    print(f"After removing duplicates from og: {len(decisions.decisions)}")
 
     # replace the original decision
     og_decision = decisions.decision_for(call_site)
@@ -80,7 +83,9 @@ def trickle_decision_change(
         final = trickle_negative(decisions, updated_decision)
 
     for f in final:
+        print(f"Before removing duplicates: {len(f.decisions)}")
         f.remove_implicit_duplicates()
+        print(f"After removing duplicates: {len(f.decisions)}")
 
     return final
 

@@ -79,6 +79,7 @@ class DefaultInliningCallBacks(InliningControllerCallBacks):
     def start(self) -> PluginSettings:
         return PluginSettings(
             report_callgraph_at_end=self.store_final_callgraph,
+            # no_duplicate_calls=False,
             # enable_debug_logs=True
         )
 
