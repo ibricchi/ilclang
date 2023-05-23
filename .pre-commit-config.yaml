@@ -20,7 +20,11 @@ repos:
         additional_dependencies: [
             pyzmq==25.0.0,
             betterproto==2.0.0b5,
-            diopter==0.0.21,
-            /local/home/ibricchi/pyllinliner
+            /local/home/ibricchi/diopter,
+            /local/home/ibricchi/pyllinliner,
+            types-setuptools,
+            types-python-dateutil,
+            types-protobuf,
+            types-cffi
         ]
         args: [--strict]

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from pyllinliner.inlinercontroller import CallSite
+from pyllinliner.inlinercontroller import CallSite, InliningDecision
 
 
 @dataclass()
@@ -183,6 +183,16 @@ class DecisionSet:
     def save(self, path: str) -> None:
         with open(path, "w") as f:
             f.write(str(self))
+
+    def to_pyll_tuple(self) -> tuple[InliningDecision, ...]:
+        return (InliningDecision(d.call_site, d.inlined) for d in self.decisions)
+
+    @staticmethod
+    def from_pyll_tuple(pyll_decisions: tuple[InliningDecision, ...]) -> DecisionSet:
+        ds = DecisionSet()
+        for d in pyll_decisions:
+            ds.add_decision(d.callsite, d.inlined)
+        return ds
 
     def __str__(self) -> str:
         output = ""

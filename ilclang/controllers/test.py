@@ -21,7 +21,7 @@ from pyllinliner.inlinercontroller import (
     PluginSettings,
 )
 
-from ilclang.controllers.replay import ReplayInliningCallBacks
+from ilclang.controllers.full_replay import FullReplayInliningCallBacks
 from ilclang.utils.decision import DecisionSet
 from ilclang.utils.decision_file import trickle_decision_flip
 from ilclang.utils.logger import Logger
@@ -181,7 +181,7 @@ def run_inlining(
             new_decision_file = f"out/instructions_{next_to_flip}_v_{version}.log"
             decision_log(new_decision_file, new_decisions)
             # run the replay inlining
-            replay_callbacks = ReplayInliningCallBacks(
+            replay_callbacks = FullReplayInliningCallBacks(
                 False,
                 False,
                 new_decisions,
