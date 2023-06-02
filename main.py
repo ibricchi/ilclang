@@ -5,7 +5,16 @@ import sys
 
 from diopter.compiler import CompilationOutputType, CompilationResult
 
-from ilclang.controllers import default, no_inline, perm, random, full_replay, replay, test
+from ilclang.controllers import (
+    default,
+    full_replay,
+    no_inline,
+    perm,
+    random,
+    replay,
+    stats_replay,
+    test,
+)
 from ilclang.utils.logger import Logger
 
 
@@ -34,6 +43,7 @@ def main() -> None:
     parser_full_replay = full_replay.setup_parser(subparsers)
     parser_perm = perm.setup_parser(subparsers)
     parser_replay = replay.setup_parser(subparsers)
+    parser_stats_replay = stats_replay.setup_parser(subparsers)
     parser_test = test.setup_parser(subparsers)
 
     for p in [
@@ -43,6 +53,7 @@ def main() -> None:
         parser_full_replay,
         parser_perm,
         parser_replay,
+        parser_stats_replay,
         parser_test,
     ]:
         p.add_argument(
@@ -89,6 +100,8 @@ def main() -> None:
         result = perm.run_inlining(compiler, args)
     elif args.mode == "replay":
         result = replay.run_inlining(compiler, args)
+    elif args.mode == "stats-replay":
+        result = stats_replay.run_inlining(compiler, args)
     elif args.mode == "test":
         result = test.run_inlining(compiler, args)
     else:
